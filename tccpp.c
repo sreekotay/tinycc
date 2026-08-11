@@ -32,6 +32,8 @@ ST_DATA int parse_flags;
 
 ST_DATA struct BufferedFile *file;
 ST_DATA int tok;
+ST_DATA int tok_col;
+ST_DATA long cc_tok_off;
 ST_DATA CValue tokc;
 ST_DATA const int *macro_ptr;
 ST_DATA CString tokcstr; /* current parsed string, if any */
@@ -92,6 +94,7 @@ static const unsigned char tok_two_chars[] =
     '^','=', TOK_A_XOR,
     '|','=', TOK_A_OR,
     '-','>', TOK_ARROW,
+    '=','>', TOK_CC_ARROW,
     '.','.', TOK_TWODOTS,
     '#','#', TOK_TWOSHARPS,
     0
@@ -590,6 +593,8 @@ ST_FUNC const char *get_tok_str(int v, CValue *cv)
         goto addv;
     case TOK_DOTS:
         return strcpy(p, "...");
+    case TOK_CC_ARROW:
+        return strcpy(p, "=>");
     case TOK_A_SHL:
         return strcpy(p, "<<=");
     case TOK_A_SAR:
@@ -2592,6 +2597,18 @@ static void next_nomacro(void)
 
     p = file->buf_ptr;
  redo_no_start:
+    /* CC extension: best-effort token column tracking (1-based). */
+    if (file && file->cc_line_start && p >= file->cc_line_start)
+        tok_col = (int)(p - file->cc_line_start) + 1;
+    else
+        tok_col = 1;
+    /* CC extension: byte offset of the token start within the top-level
+     * in-memory parse buffer (-1 inside nested include streams, where
+     * buf_ptr is a window, not a global offset). */
+    if (file && !file->prev && p >= file->buffer)
+        cc_tok_off = (long)(p - file->buffer);
+    else
+        cc_tok_off = -1;
     c = *p;
     switch(c) {
     case ' ':
@@ -2656,6 +2673,8 @@ static void next_nomacro(void)
     case '\n':
         file->line_num++;
         p++;
+        if (file)
+            file->cc_line_start = p;
 maybe_newline:
         tok_flags |= TOK_FLAG_BOL;
         if (0 == (parse_flags & PARSE_FLAG_LINEFEED))
@@ -2923,8 +2942,20 @@ maybe_newline:
         }
         break;
 
+    case '=':
+        PEEKC(c, p);
+        if (c == '>') {
+            p++;
+            tok = TOK_CC_ARROW;
+        } else if (c == '=') {
+            p++;
+            tok = TOK_EQ;
+        } else {
+            tok = '=';
+        }
+        break;
+
     PARSE2('!', '!', '=', TOK_NE)
-    PARSE2('=', '=', '=', TOK_EQ)
     PARSE2('*', '*', '=', TOK_A_MUL)
     PARSE2('%', '%', '=', TOK_A_MOD)
     PARSE2('^', '^', '=', TOK_A_XOR)
@@ -3516,6 +3547,10 @@ ST_FUNC void next(void)
     int t;
     while (macro_ptr) {
 redo:
+        /* CC extension: replayed tokens (macro expansion / unget) have no
+         * position in the top-level buffer; a stale offset here would point
+         * at the invocation site's tail, not the construct. */
+        cc_tok_off = -1;
         t = *macro_ptr;
         if (TOK_HAS_VALUE(t)) {
             tok_get(&tok, &macro_ptr, &tokc);
@@ -3846,7 +3881,19 @@ static void pp_line(TCCState *s1, BufferedFile *f, int level)
 
     if (s1->Pflag == LINE_MACRO_OUTPUT_FORMAT_NONE) {
         ;
-    } else if (level == 0 && f->line_ref && d < 8) {
+    } else if (level == 0 && f->line_ref && d >= 0 && d < 8) {
+	/* CC patch: the upstream condition was `d < 8` which fires for
+	 * negative deltas too (e.g. user code that emits `#line N
+	 * "file"` with N pointing back to a small line number after a
+	 * large synthetic injection — Concurrent-C does this routinely
+	 * to resume the user's source after prepending generated
+	 * declarations). The inner `while (d > 0)` loop is a no-op for
+	 * d < 0, so the directive was silently dropped from the
+	 * preprocessed output, leaving TCC's parser with stale line
+	 * tracking and emitting diagnostics with wrong line numbers
+	 * (see tests/m0_5_diag_origin_line_fail.ccs). Restricting the
+	 * swallow to non-negative deltas falls through to the regular
+	 * `#line` emission for the resume case. */
 	while (d > 0)
 	    fputs("\n", s1->ppfp), --d;
     } else if (s1->Pflag == LINE_MACRO_OUTPUT_FORMAT_STD) {

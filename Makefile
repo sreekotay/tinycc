@@ -21,6 +21,9 @@ LIBTCC1 = libtcc1.a
 LINK_LIBTCC =
 LIBS =
 CFLAGS += $(CPPFLAGS)
+ifeq ($(CONFIG_cc_ext),yes)
+  CFLAGS += -DCONFIG_CC_EXT
+endif
 VPATH = $(TOPSRC)
 -LTCC = $(TOP)/$(LIBTCC)
 
