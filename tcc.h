@@ -454,8 +454,6 @@ typedef struct TokenSym {
 
 #ifdef CONFIG_CC_EXT
 #define CC_TCC_EXT_AVAILABLE 1
-/* Stub-AST / ExtParser retired with the legacy multipass front. Remaining
- * CONFIG_CC_EXT surface is UFCS host tolerance + TOK_CC_ARROW (PR2 to drop). */
 #endif
 
 #ifdef TCC_TARGET_PE
@@ -648,9 +646,6 @@ typedef struct BufferedFile {
     int fd;
     struct BufferedFile *prev;
     int line_num;    /* current line number - here to simplify code */
-    /* CC extension: best-effort column tracking within the current line.
-       Points at the start of the current line within the active buffer. */
-    uint8_t *cc_line_start;
     int line_ref;    /* tcc -E: last printed line */
     int ifndef_macro;  /* #ifndef macro / #endif search */
     int ifndef_macro_saved; /* saved ifndef_macro */
@@ -880,33 +875,6 @@ struct TCCState {
 
     int ifdef_stack[IFDEF_STACK_SIZE];
     int *ifdef_stack_ptr;
-#ifdef CONFIG_CC_EXT
-    unsigned int cc_pending_fn_attrs;
-    int cc_last_member_tok;
-    int cc_last_member_flags;
-    int cc_last_member_line;
-    int cc_last_member_col;
-    long cc_last_member_off;
-    char cc_last_recv_type[128];
-    int cc_last_rparen_line;
-    int cc_last_rparen_col;
-    struct {
-        Sym *ref;
-        char *name;
-    } *cc_typedef_map;
-    int cc_typedef_map_count;
-    int cc_typedef_map_cap;
-#define CC_UFCS_SEQ_MAX 128
-    int cc_ufcs_seq_line;
-    unsigned int cc_ufcs_seq_fhash;
-    int cc_ufcs_seq_n;
-    struct { int tok; int col; int occ; } cc_ufcs_seq[CC_UFCS_SEQ_MAX];
-    int cc_ufcs_active;
-    int cc_ufcs_result_pending;
-    int cc_in_closure_body;
-    int cc_paren_start_line;
-    int cc_paren_start_col;
-#endif
 
     /* included files enclosed with #ifndef MACRO */
     int cached_includes_hash[CACHED_INCLUDES_HASH_SIZE];
@@ -1187,7 +1155,6 @@ struct filespec {
 #define TOK_TWODOTS 0xa2 /* C++ token ? */
 #define TOK_TWOSHARPS 0xa3 /* ## preprocessing token */
 #define TOK_PLCHLDR 0xa4 /* placeholder token as defined in C99 */
-#define TOK_CC_ARROW 0xa5 /* => (CC closure arrow) */
 #define TOK_PPJOIN  (TOK_TWOSHARPS | SYM_FIELD) /* A '##' in a macro to mean pasting */
 #define TOK_SOTYPE  0xa7 /* alias of '(' for parsing sizeof (type) */
 
@@ -1262,15 +1229,6 @@ PUB_FUNC void *tcc_malloc(unsigned long size);
 PUB_FUNC void *tcc_mallocz(unsigned long size);
 PUB_FUNC void *tcc_realloc(void *ptr, unsigned long size);
 PUB_FUNC char *tcc_strdup(const char *str);
-
-/* Stub-AST / ExtParser / recording APIs retired. */
-#define CC_REC_START(kind)       ((void)0)
-#define CC_REC_END()             ((void)0)
-#define CC_REC_CALL(flags)       ((void)0)
-#define CC_REC_ASSIGN(op)        ((void)0)
-#define CC_REC_RETURN()          ((void)0)
-#define CC_REC_BINARY(op)        ((void)0)
-#define CC_REC_UNARY(op, post)   ((void)0)
 
 #ifdef MEM_DEBUG
 #define tcc_free(ptr)           tcc_free_debug(ptr)
@@ -1380,9 +1338,6 @@ ST_FUNC int normalized_PATHCMP(const char *f1, const char *f2);
 
 ST_DATA struct BufferedFile *file;
 ST_DATA int tok;
-/* CC extension: best-effort 1-based starting column of the current token. */
-ST_DATA int tok_col;
-ST_DATA long cc_tok_off;   /* CC ext: token-start byte offset in top-level buffer, -1 unknown */
 ST_DATA CValue tokc;
 ST_DATA const int *macro_ptr;
 ST_DATA int parse_flags;

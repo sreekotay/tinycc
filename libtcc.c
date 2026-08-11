@@ -738,7 +738,6 @@ ST_FUNC void tcc_open_bf(TCCState *s1, const char *filename, int initlen)
     bf->buf_ptr = bf->buffer;
     bf->buf_end = bf->buffer + initlen;
     bf->buf_end[0] = CH_EOB; /* put eob symbol */
-    bf->cc_line_start = bf->buffer;
     pstrcpy(bf->filename, sizeof(bf->filename), filename);
 #ifdef _WIN32
     normalize_slashes(bf->filename);
@@ -960,14 +959,6 @@ LIBTCCAPI void tcc_delete(TCCState *s1)
 #endif
     /* free loaded dlls array */
     dynarray_reset(&s1->loaded_dlls, &s1->nb_loaded_dlls);
-#ifdef CONFIG_CC_EXT
-    if (s1->cc_typedef_map) {
-        for (int i = 0; i < s1->cc_typedef_map_count; i++) {
-            tcc_free(s1->cc_typedef_map[i].name);
-        }
-        tcc_free(s1->cc_typedef_map);
-    }
-#endif
     tcc_free(s1);
 #ifdef MEM_DEBUG
     tcc_memcheck(-1);
